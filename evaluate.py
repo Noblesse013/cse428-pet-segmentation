@@ -35,7 +35,7 @@ def load_model(model_type: str, checkpoint_path: Path, num_classes: int):
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
-    checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
+    checkpoint = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(DEVICE)
     model.eval()
@@ -50,7 +50,7 @@ def main():
     args = parser.parse_args()
 
     config.validate_cuda()
-    print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+    print(f"Device: {DEVICE} ({torch.cuda.get_device_name(0)})")
 
     # ── Load data splits ────────────────────────────────────────────────
     train_entries, val_entries, test_entries, \

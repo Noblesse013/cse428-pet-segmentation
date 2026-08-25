@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from .amp_compat import autocast
 
 from .metrics import (
     compute_iou,
@@ -24,7 +24,8 @@ from .metrics import (
     compute_classification_recall,
     compute_classification_f1,
 )
-from config import DEVICE, USE_AMP, SEGMENTATION_THRESHOLD
+import config
+from config import SEGMENTATION_THRESHOLD
 
 
 def train_one_epoch(
@@ -33,7 +34,7 @@ def train_one_epoch(
     criterion,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    scaler: GradScaler = None,
+    scaler=None,
     threshold: float = SEGMENTATION_THRESHOLD,
 ) -> dict:
     """Run one training epoch.  Returns average losses and metrics."""
@@ -56,8 +57,8 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
 
-        if scaler is not None and USE_AMP:
-            with autocast(device_type="cuda"):
+        if scaler is not None and config.USE_AMP:
+            with autocast(enabled=True):
                 seg_logits, cls_logits = model(images)
                 loss, seg_loss, cls_loss = criterion(
                     seg_logits, cls_logits, masks, labels

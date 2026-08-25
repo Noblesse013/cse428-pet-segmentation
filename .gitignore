@@ -14,6 +14,8 @@ build/
 .DS_Store
 ._*
 
-# Dataset — too large for GitHub; download separately
+# Dataset - too large for GitHub; download separately or via src/data_setup.py
 images/
 annotations/
+data/
+*.tar.gz

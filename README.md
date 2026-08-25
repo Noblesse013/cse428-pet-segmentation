@@ -13,10 +13,33 @@ Both share a common encoder and train segmentation + classification together.
 
 ---
 
+## Run it on a free GPU (Colab / Kaggle)
+
+No local GPU needed. The notebook clones this repo, downloads the dataset,
+trains both models, evaluates them and renders the demo figures.
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Noblesse013/cse428-pet-segmentation/blob/master/notebooks/CSE428_Pet_MultiTask_Colab_Kaggle.ipynb)
+
+**Colab** — click the badge, then `Runtime -> Change runtime type -> T4 GPU`, then `Runtime -> Run all`.
+
+**Kaggle** — `New Notebook -> File -> Import Notebook`, upload
+`notebooks/CSE428_Pet_MultiTask_Colab_Kaggle.ipynb`, then in the sidebar set
+`Accelerator -> GPU T4 x2` and `Internet -> On`, and `Run All`.
+
+Set `config.NUM_EPOCHS = 5` in section 5 for a quick end-to-end check before
+committing to the full 30-epoch run (~45-60 min per model on a T4).
+
+On Kaggle you can skip the download entirely by attaching an Oxford-IIIT Pet
+dataset with `+ Add Input` — `config.py` finds anything under `/kaggle/input`
+that contains `images/` and `annotations/trimaps/`.
+
+---
+
 ## Requirements
 
-- **NVIDIA CUDA-enabled GPU** and a CUDA-enabled PyTorch installation are **required**.
-  The code will raise an error if no CUDA GPU is detected.
+- **NVIDIA CUDA-enabled GPU** and a CUDA-enabled PyTorch installation are **required**
+  for the training / evaluation scripts; they raise a clear error if no CUDA GPU is
+  found. Use the Colab/Kaggle notebook above if you don't have one.
 - Python 3.9+
 
 Install dependencies:
@@ -29,15 +52,25 @@ pip install -r requirements.txt
 
 ## Dataset
 
-The Oxford-IIIT Pet dataset must already be present in the repository:
+The Oxford-IIIT Pet dataset is not tracked in git (~800 MB). Either extract
+`images/` and `annotations/` into the project root:
 
 ```
 images/           # JPG pet images
 annotations/      # Annotation files (list.txt, trainval.txt, test.txt, trimaps/)
 ```
 
-Do **not** place the dataset download zip/tar here — extract `images/` and
-`annotations/` directly into the project root.
+...or let the helper fetch it for you:
+
+```python
+from src.data_setup import ensure_dataset
+image_dir, annotation_dir = ensure_dataset()
+```
+
+`config.py` discovers the dataset at import time, searching the project root,
+`data/`, `/content` (Colab) and every directory under `/kaggle/input` (Kaggle),
+so the nested layout above and a Kaggle attached input both work unchanged.
+Override the search with the `PET_IMAGE_DIR` / `PET_ANNOTATION_DIR` env vars.
 
 ---
 
@@ -61,11 +94,16 @@ project_root/
 │   ├── train_utils.py       # Training & validation loops
 │   ├── evaluation.py        # Full evaluation + table printing
 │   ├── visualization.py     # Plots + demo overlay
+│   ├── data_setup.py        # Dataset download/discovery for cloud notebooks
+│   ├── amp_compat.py        # Mixed-precision shim across PyTorch versions
 │   └── models/
 │       ├── blocks.py        # DoubleConv, DownBlock, UpBlock
 │       ├── unet.py          # Base U-Net + classifier
 │       ├── attention_blocks.py  # AttentionGate
 │       └── attention_unet.py # Attention U-Net + classifier
+│
+├── notebooks/
+│   └── CSE428_Pet_MultiTask_Colab_Kaggle.ipynb   # Colab / Kaggle runner
 │
 ├── checkpoints/             # Saved model weights (created during training)
 ├── results/                 # CSVs, plots, demo images
@@ -172,16 +210,28 @@ total_loss = seg_bce + seg_dice + classification_weight * cls_crossentropy
 
 All hyperparameters are centralised in `config.py`. Key settings:
 
-| Parameter                | Default |
-|--------------------------|---------|
-| IMAGE_SIZE               | 256     |
-| BATCH_SIZE               | 8       |
-| NUM_EPOCHS               | 30      |
-| LEARNING_RATE            | 1e-3    |
-| CLASSIFICATION_LOSS_WEIGHT | 1.0   |
-| SEGMENTATION_THRESHOLD   | 0.5     |
-| USE_AMP                  | True    |
-| DEVICE                   | cuda    |
+| Parameter                  | Default                | Env-var override         |
+|----------------------------|------------------------|--------------------------|
+| IMAGE_SIZE                 | 256                    | `PET_IMAGE_SIZE`         |
+| BATCH_SIZE                 | 8 local / 16 on cloud  | `PET_BATCH_SIZE`         |
+| NUM_EPOCHS                 | 30                     | `PET_NUM_EPOCHS`         |
+| LEARNING_RATE              | 1e-3                   | `PET_LEARNING_RATE`      |
+| CLASSIFICATION_LOSS_WEIGHT | 1.0                    | `PET_CLS_LOSS_WEIGHT`    |
+| SEGMENTATION_THRESHOLD     | 0.5                    | `PET_SEG_THRESHOLD`      |
+| NUM_WORKERS                | 0 on Windows, else 2   | `PET_NUM_WORKERS`        |
+| USE_AMP                    | True when CUDA present | `PET_USE_AMP`            |
+| DEVICE                     | cuda if available      | -                        |
+
+Every value can also be set from a notebook before training:
+
+```python
+import config
+config.NUM_EPOCHS = 10
+history = train_unet.main(num_epochs=10, batch_size=16)   # or pass directly
+```
+
+`config.describe_environment()` prints the resolved environment, device, paths
+and hyperparameters — worth running first in any new session.
 
 ---
 
@@ -191,4 +241,9 @@ All hyperparameters are centralised in `config.py`. Key settings:
 - Images are resized to 256x256. Masks use nearest-neighbour interpolation to preserve binary values.
 - Training augmentation: random horizontal flip, rotation, resized crop, brightness/contrast jitter.
 - Validation and test use resize-only (no random augmentation).
-- Mixed precision (AMP) is enabled by default for faster CUDA training.
+- Mixed precision (AMP) is enabled by default for faster CUDA training, and is
+  automatically disabled on CPU. `src/amp_compat.py` selects the `torch.amp` or
+  legacy `torch.cuda.amp` API depending on the installed PyTorch version.
+- `train_unet.main()` / `train_attention_unet.main()` accept keyword overrides and
+  return the training-history dict, so they are usable from a notebook as well as
+  from the command line.

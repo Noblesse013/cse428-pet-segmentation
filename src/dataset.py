@@ -19,8 +19,12 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
 from torch.utils.data import Dataset
+
+# A few Oxford-IIIT Pet JPEGs are truncated; without this a cloud run can
+# die several epochs in with 'image file is truncated'.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def _parse_annotation_file(filepath: Path) -> List[Dict]:
@@ -241,16 +245,20 @@ def create_dataloaders(
         image_size=image_size, transform=eval_transform, mode="test",
     )
 
+    # Respawning workers every epoch costs several seconds on Colab/Kaggle.
+    loader_kwargs = dict(num_workers=num_workers, pin_memory=pin_memory)
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 2
+
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=pin_memory, drop_last=True,
+        drop_last=True, **loader_kwargs,
     )
     val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin_memory,
+        val_ds, batch_size=batch_size, shuffle=False, **loader_kwargs,
     )
     test_loader = DataLoader(
-        test_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin_memory,
+        test_ds, batch_size=batch_size, shuffle=False, **loader_kwargs,
     )
     return train_loader, val_loader, test_loader

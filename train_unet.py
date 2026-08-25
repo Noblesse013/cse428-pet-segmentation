@@ -19,29 +19,72 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import torch
-from torch.cuda.amp import GradScaler
 
 import config
-from config import (
-    IMAGE_DIR, ANNOTATION_DIR, TRIMAP_DIR, RESULTS_DIR, CHECKPOINT_DIR,
-    IMAGE_SIZE, BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, CLASSIFICATION_LOSS_WEIGHT,
-    RANDOM_SEED, NUM_WORKERS, PIN_MEMORY, VAL_RATIO, USE_AMP, DEVICE,
-)
 from src.dataset import get_splits, create_dataloaders
 from src.transforms import get_train_transform, get_eval_transform
 from src.models.unet import BaseUNet
 from src.losses import MultiTaskLoss
 from src.train_utils import train_one_epoch, evaluate_one_epoch
+from src.amp_compat import get_grad_scaler
 from src.visualization import plot_all_curves
 
-# Reproducibility
-torch.manual_seed(RANDOM_SEED)
-torch.cuda.manual_seed_all(RANDOM_SEED)
 
 
-def main():
+def main(
+    num_epochs=None,
+    batch_size=None,
+    learning_rate=None,
+    image_size=None,
+    num_workers=None,
+    base_features=64,
+    cls_loss_weight=None,
+    image_dir=None,
+    trimap_dir=None,
+    annotation_dir=None,
+    checkpoint_dir=None,
+    results_dir=None,
+):
+    """Train the model and return the training-history dict.
+
+    Every argument defaults to the value in `config`, which is itself
+    overridable with PET_* environment variables.  Passing them explicitly is
+    the convenient path from a notebook:
+
+        import train_unet
+        history = train_unet.main(num_epochs=10, batch_size=16)
+    """
+    # Resolve settings at call time, so a notebook that edits `config` after
+    # import (or passes overrides here) is respected.
+    image_dir = config.IMAGE_DIR if image_dir is None else Path(image_dir)
+    trimap_dir = config.TRIMAP_DIR if trimap_dir is None else Path(trimap_dir)
+    annotation_dir = config.ANNOTATION_DIR if annotation_dir is None else Path(annotation_dir)
+    checkpoint_dir = config.CHECKPOINT_DIR if checkpoint_dir is None else Path(checkpoint_dir)
+    results_dir = config.RESULTS_DIR if results_dir is None else Path(results_dir)
+
+    IMAGE_DIR, TRIMAP_DIR, ANNOTATION_DIR = image_dir, trimap_dir, annotation_dir
+    CHECKPOINT_DIR, RESULTS_DIR = checkpoint_dir, results_dir
+
+    IMAGE_SIZE = config.IMAGE_SIZE if image_size is None else image_size
+    BATCH_SIZE = config.BATCH_SIZE if batch_size is None else batch_size
+    NUM_EPOCHS = config.NUM_EPOCHS if num_epochs is None else num_epochs
+    LEARNING_RATE = config.LEARNING_RATE if learning_rate is None else learning_rate
+    NUM_WORKERS = config.NUM_WORKERS if num_workers is None else num_workers
+    CLASSIFICATION_LOSS_WEIGHT = (config.CLASSIFICATION_LOSS_WEIGHT
+                                  if cls_loss_weight is None else cls_loss_weight)
+    PIN_MEMORY = config.PIN_MEMORY
+    VAL_RATIO = config.VAL_RATIO
+    RANDOM_SEED = config.RANDOM_SEED
+    USE_AMP = config.USE_AMP
+    DEVICE = config.DEVICE
+
+    torch.manual_seed(RANDOM_SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(RANDOM_SEED)
+
     config.validate_cuda()
-    print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+    gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    print(f"Device: {DEVICE} ({gpu})")
 
     # ── Data ────────────────────────────────────────────────────────────
     train_entries, val_entries, test_entries, \
@@ -66,7 +109,7 @@ def main():
     )
 
     # ── Model ───────────────────────────────────────────────────────────
-    model = BaseUNet(in_channels=3, num_classes=num_classes, base_features=64)
+    model = BaseUNet(in_channels=3, num_classes=num_classes, base_features=base_features)
     model = model.to(DEVICE)
     print(f"Base U-Net parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -74,7 +117,7 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE,
                                  weight_decay=1e-5)
     criterion = MultiTaskLoss(classification_weight=CLASSIFICATION_LOSS_WEIGHT)
-    scaler = GradScaler() if USE_AMP else None
+    scaler = get_grad_scaler(enabled=USE_AMP)
 
     # ── Training loop ───────────────────────────────────────────────────
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -108,13 +151,13 @@ def main():
         )
 
         # Print summary
-        print(f"  Train — loss: {train_metrics['total_loss']:.4f}  "
+        print(f"  Train - loss: {train_metrics['total_loss']:.4f}  "
               f"seg: {train_metrics['seg_loss']:.4f}  "
               f"cls: {train_metrics['cls_loss']:.4f}  "
               f"IoU: {train_metrics['iou']:.4f}  "
               f"Dice: {train_metrics['dice']:.4f}  "
               f"Acc: {train_metrics['cls_accuracy']:.4f}")
-        print(f"  Val   — loss: {val_metrics['total_loss']:.4f}  "
+        print(f"  Val   - loss: {val_metrics['total_loss']:.4f}  "
               f"seg: {val_metrics['seg_loss']:.4f}  "
               f"cls: {val_metrics['cls_loss']:.4f}  "
               f"IoU: {val_metrics['iou']:.4f}  "
@@ -157,10 +200,10 @@ def main():
                 "config": {
                     "image_size": IMAGE_SIZE,
                     "num_classes": num_classes,
-                    "base_features": 64,
+                    "base_features": base_features,
                 },
             }, CHECKPOINT_DIR / "best_unet.pth")
-            print(f"  ✓ Saved best model (val IoU = {best_val_iou:.4f})")
+            print(f"  [best] Saved best model (val IoU = {best_val_iou:.4f})")
 
     # ── Save history CSV ────────────────────────────────────────────────
     csv_path = RESULTS_DIR / "unet_history.csv"
@@ -174,7 +217,9 @@ def main():
 
     # ── Plot training curves ────────────────────────────────────────────
     plot_all_curves(history, str(RESULTS_DIR), prefix="unet")
-    print("Training curves saved to results/")
+    print(f"Training curves saved to {RESULTS_DIR}")
+
+    return history
 
 
 if __name__ == "__main__":

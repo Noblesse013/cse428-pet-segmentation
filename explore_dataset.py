@@ -50,7 +50,7 @@ def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     save_path = str(RESULTS_DIR / "exploration_samples.png")
     show_random_samples(full_ds, n=9, save_path=save_path)
-    print(f"\n3×3 sample grid saved to: {save_path}")
+    print(f"\n3x3 sample grid saved to: {save_path}")
 
     # ── Species distribution ────────────────────────────────────────────
     cat_count = sum(1 for e in all_entries if breed_species.get(
