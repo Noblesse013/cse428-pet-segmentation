@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.pth
+*.csv
+results/*.png
+results/*.csv
+checkpoints/*.pth
+.eggs/
+*.egg-info/
+dist/
+build/
+.DS_Store
+._*
+
+# Dataset — too large for GitHub; download separately
+images/
+annotations/
