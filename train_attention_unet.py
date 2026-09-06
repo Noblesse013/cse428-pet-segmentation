@@ -116,8 +116,13 @@ def main(
     # ── Optimiser & loss ────────────────────────────────────────────────
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE,
                                  weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=lr_scheduler_factor,
+        patience=lr_scheduler_patience, verbose=True,
+    )
     criterion = MultiTaskLoss(classification_weight=CLASSIFICATION_LOSS_WEIGHT)
     scaler = get_grad_scaler(enabled=USE_AMP)
+    no_improve_count = 0
 
     # ── Training loop ───────────────────────────────────────────────────
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -190,6 +195,7 @@ def main(
         # Save best model by validation IoU
         if val_metrics["iou"] > best_val_iou:
             best_val_iou = val_metrics["iou"]
+            no_improve_count = 0
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -203,6 +209,17 @@ def main(
                 },
             }, CHECKPOINT_DIR / "best_attention_unet.pth")
             print(f"  [best] Saved best model (val IoU = {best_val_iou:.4f})")
+        else:
+            no_improve_count += 1
+
+        scheduler.step(val_metrics["iou"])
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"  [lr] current learning rate = {current_lr:.2e}")
+
+        if early_stopping_patience and no_improve_count >= early_stopping_patience:
+            print(f"  [early stop] No improvement for {early_stopping_patience} epochs. "
+                  f"Training stopped at epoch {epoch}.")
+            break
 
     # ── Save history CSV ────────────────────────────────────────────────
     csv_path = RESULTS_DIR / "attention_unet_history.csv"

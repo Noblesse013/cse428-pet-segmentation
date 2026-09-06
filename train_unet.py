@@ -46,6 +46,9 @@ def main(
     results_dir=None,
     use_augmentation=True,
     weight_decay=1e-5,
+    early_stopping_patience=7,
+    lr_scheduler_patience=3,
+    lr_scheduler_factor=0.5,
 ):
     """Train the model and return the training-history dict.
 
@@ -116,11 +119,18 @@ def main(
     model = model.to(DEVICE)
     print(f"Base U-Net parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # ── Optimiser & loss ────────────────────────────────────────────────
+    # ── Optimiser, scheduler & loss ─────────────────────────────────────
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE,
                                  weight_decay=weight_decay)
+    # ReduceLROnPlateau: if val IoU stops improving, the LR is halved.
+    # This is the key technique for closing the train/val gap.
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=lr_scheduler_factor,
+        patience=lr_scheduler_patience, verbose=True,
+    )
     criterion = MultiTaskLoss(classification_weight=CLASSIFICATION_LOSS_WEIGHT)
     scaler = get_grad_scaler(enabled=USE_AMP)
+    no_improve_count = 0
 
     # ── Training loop ───────────────────────────────────────────────────
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +151,7 @@ def main(
         "train_class_f1": [], "val_class_f1": [],
     }
 
-    for epoch in range(1, NUM_EPOCHS + 1):
+    for epoch in range(1, NUM_EPOCHS + 1):  # noqa: C901
         print(f"\nEpoch {epoch}/{NUM_EPOCHS}")
         print("-" * 50)
 
@@ -194,6 +204,7 @@ def main(
         # Save best model by validation IoU
         if val_metrics["iou"] > best_val_iou:
             best_val_iou = val_metrics["iou"]
+            no_improve_count = 0
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -207,6 +218,20 @@ def main(
                 },
             }, CHECKPOINT_DIR / "best_unet.pth")
             print(f"  [best] Saved best model (val IoU = {best_val_iou:.4f})")
+        else:
+            no_improve_count += 1
+
+        # Step the LR scheduler — LR is reduced when val IoU stops improving
+        scheduler.step(val_metrics["iou"])
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"  [lr] current learning rate = {current_lr:.2e}")
+
+        # Early stopping — stop training if val IoU has not improved for
+        # early_stopping_patience consecutive epochs
+        if early_stopping_patience and no_improve_count >= early_stopping_patience:
+            print(f"\n  [early stop] No improvement for {early_stopping_patience} epochs. "
+                  f"Training stopped at epoch {epoch}.")
+            break
 
     # ── Save history CSV ────────────────────────────────────────────────
     csv_path = RESULTS_DIR / "unet_history.csv"
