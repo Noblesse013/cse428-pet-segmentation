@@ -44,6 +44,8 @@ def main(
     annotation_dir=None,
     checkpoint_dir=None,
     results_dir=None,
+    use_augmentation=True,
+    weight_decay=1e-5,
 ):
     """Train the model and return the training-history dict.
 
@@ -99,12 +101,13 @@ def main(
     print(f"Test samples:       {len(test_entries)}")
     print(f"Number of classes:  {num_classes}")
 
+    train_tf = get_train_transform(IMAGE_SIZE) if use_augmentation else get_eval_transform(IMAGE_SIZE)
     train_loader, val_loader, _ = create_dataloaders(
         IMAGE_DIR, TRIMAP_DIR, ANNOTATION_DIR, class_to_idx,
         train_entries, val_entries, test_entries,
         image_size=IMAGE_SIZE, batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY,
-        train_transform=get_train_transform(IMAGE_SIZE),
+        train_transform=train_tf,
         eval_transform=get_eval_transform(IMAGE_SIZE),
     )
 
@@ -115,7 +118,7 @@ def main(
 
     # ── Optimiser & loss ────────────────────────────────────────────────
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE,
-                                 weight_decay=1e-5)
+                                 weight_decay=weight_decay)
     criterion = MultiTaskLoss(classification_weight=CLASSIFICATION_LOSS_WEIGHT)
     scaler = get_grad_scaler(enabled=USE_AMP)
 

@@ -229,9 +229,9 @@ def validate_cuda():
             hint = "Kaggle: sidebar -> Session options -> Accelerator -> GPU T4 x2 / P100."
         else:
             hint = "Install a CUDA-enabled PyTorch build and run on an NVIDIA GPU."
-        raise RuntimeError(
-            "CUDA is required for this project, but no CUDA-enabled GPU "
-            f"was detected.\n{hint}"
+        print(
+            "WARNING: CUDA is recommended for this project, but no CUDA-enabled GPU "
+            f"was detected. Falling back to CPU. This will be very slow!\n{hint}"
         )
 
 
