@@ -1,0 +1,326 @@
+=== Cell 1 [markdown] ===
+# CSE428 — Oxford-IIIT Pet: Multi-Task Segmentation + Breed Classification
+
+Base U-Net and Attention U-Net, each with a shared encoder driving **two heads**:
+a segmentation decoder (binary pet/background mask) and a breed classifier (37 classes).
+
+This notebook runs the project's real modules — it clones the repo rather than
+duplicating the code, so results here match `python train_unet.py` locally.
+
+### Before you run anything — turn the GPU on
+
+| | |
+|---|---|
+| **Colab** | `Runtime → Change r
+
+=== Cell 2 [markdown] ===
+## 1. Check the GPU
+
+=== Cell 3 [code] ===
+!nvidia-smi
+
+=== Cell 4 [markdown] ===
+## 2. Get the code
+
+Tried in order: code already present (including anything you attached on Kaggle
+via `+ Add Input`) -> `git clone` from `REPO_URL`. Point `REPO_URL` at your own
+fork if you have one, or set it to `""` if you are supplying the code yourself.
+
+
+=== Cell 5 [code] ===
+import os, sys, shutil, subprocess
+from pathlib import Path
+
+REPO_URL  = "https://github.com/Noblesse013/cse428-pet-segmentation.git"
+REPO_NAME = "cse428-pet-segmentation"
+
+IN_COLAB  = "google.colab" in sys.modules
+IN_KAGGLE = Path("/kaggle/input").is_dir()
+WORK = Path("/kaggle/working") if IN_KAGGLE else (Path("/content") if IN_COLAB else Path.cwd())
+
+
+def is_project(path):
+    """A project root has config.py and the src package."""
+    try:
+        return (path / "config.py").is_file() and (pa
+
+=== Cell 6 [markdown] ===
+## 3. Dependencies
+
+Colab and Kaggle already ship PyTorch, torchvision, numpy, pandas, matplotlib,
+Pillow, scikit-learn and tqdm — so this is normally a no-op. It installs only
+what is genuinely missing, which keeps the cell fast and avoids a runtime
+restart from reinstalling torch.
+
+=== Cell 7 [code] ===
+import importlib, subprocess, sys
+
+required = {
+    "torch": "torch", "torchvision": "torchvision", "numpy": "numpy",
+    "pandas": "pandas", "matplotlib": "matplotlib", "PIL": "Pillow",
+    "sklearn": "scikit-learn", "tqdm": "tqdm",
+}
+
+missing = [pkg for mod, pkg in required.items() if importlib.util.find_spec(mod) is None]
+if missing:
+    print("Installing:", missing)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True)
+else:
+    print("All dependencies alre
+
+=== Cell 8 [markdown] ===
+## 4. Fetch the dataset
+
+The images are gitignored (~800 MB), so they are downloaded here.
+
+- **Kaggle with an attached Oxford-IIIT Pet input:** detected automatically, nothing is downloaded.
+- **Otherwise:** both official tarballs are pulled from the Oxford VGG mirrors and extracted.
+
+Takes roughly 2–4 minutes on a first run; re-running the cell is instant.
+
+=== Cell 9 [code] ===
+import config
+from src.data_setup import ensure_dataset, dataset_summary, free_disk_space
+
+print(free_disk_space(), "\n")
+image_dir, annotation_dir = ensure_dataset()
+print()
+print(dataset_summary())
+
+=== Cell 10 [markdown] ===
+## 5. Configure the run
+
+`config` resolves paths per environment and every value below can be changed here.
+On a free T4, one epoch of Base U-Net at 256×256 takes roughly **1–2 minutes**, so
+30 epochs per model is roughly 45–60 min each — about 1.5–2 hours for both,
+which sits well inside the session limits on either platform.
+
+**Start with `NUM_EPOCHS = 5` to confirm the whole notebook runs end to end**, then
+raise it for the real run.
+
+=== Cell 11 [code] ===
+import config
+
+# ---- edit these ----------------------------------------------------------
+config.NUM_EPOCHS  = 5      # raise to 30 for the full run
+config.BATCH_SIZE  = 16     # 16 fits a 16 GB T4 at 256px; drop to 8 if OOM
+config.IMAGE_SIZE  = 256
+config.LEARNING_RATE = 1e-3
+config.NUM_WORKERS = 2      # Colab/Kaggle VMs have 2-4 cores
+# --------------------------------------------------------------------------
+
+config.CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+config.RESULTS_DIR.mkdi
+
+=== Cell 12 [markdown] ===
+### Optional (Colab): keep checkpoints on Google Drive
+
+Colab sessions are wiped when they disconnect. Mounting Drive means a long
+training run survives. Skip this cell on Kaggle — `/kaggle/working` is already
+persisted as notebook output.
+
+=== Cell 13 [code] ===
+USE_DRIVE = False   # set True to persist checkpoints/results to Google Drive
+
+if USE_DRIVE and "google.colab" in __import__("sys").modules:
+    from google.colab import drive
+    from pathlib import Path
+    drive.mount("/content/drive")
+    out = Path("/content/drive/MyDrive/cse428_pet")
+    config.CHECKPOINT_DIR = out / "checkpoints"
+    config.RESULTS_DIR = out / "results"
+    config.CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+ 
+
+=== Cell 14 [markdown] ===
+## 6. Explore the dataset
+
+Splits, class balance, and a 3×3 grid of images with their ground-truth masks
+overlaid. Boundary pixels (trimap value 3) are folded into the foreground, so the
+mask is a clean binary pet/background target.
+
+=== Cell 15 [code] ===
+from IPython.display import Image as ShowImage, display
+
+from src.dataset import get_splits, OxfordPetDataset
+from src.transforms import get_eval_transform
+from src.visualization import show_random_samples
+
+train_entries, val_entries, test_entries, class_to_idx, idx_to_class, breed_species = get_splits(
+    config.ANNOTATION_DIR, config.IMAGE_DIR, config.TRIMAP_DIR,
+    val_ratio=config.VAL_RATIO, seed=config.RANDOM_SEED,
+)
+NUM_CLASSES = len(class_to_idx)
+
+print(f"Train      : {len(train_entries
+
+=== Cell 16 [markdown] ===
+## 7. Train the Base U-Net
+
+Shared encoder → bottleneck, splitting into a skip-connected decoder (segmentation)
+and a pooled FC head (classification). The combined objective is
+
+    total = BCE + Dice + 1.0 * CrossEntropy
+
+The best checkpoint by **validation IoU** is saved as `best_unet.pth`.
+
+=== Cell 17 [code] ===
+import time
+import train_unet
+
+start = time.time()
+unet_history = train_unet.main(
+    num_epochs=config.NUM_EPOCHS,
+    batch_size=config.BATCH_SIZE,
+    image_size=config.IMAGE_SIZE,
+    num_workers=config.NUM_WORKERS,
+    checkpoint_dir=config.CHECKPOINT_DIR,
+    results_dir=config.RESULTS_DIR,
+)
+print(f"\nBase U-Net finished in {(time.time() - start) / 60:.1f} min")
+
+=== Cell 18 [code] ===
+from IPython.display import Image as ShowImage, display
+
+for plot in ("unet_loss_curves.png", "unet_seg_curves.png", "unet_cls_curves.png"):
+    path = config.RESULTS_DIR / plot
+    if path.exists():
+        display(ShowImage(filename=str(path), width=1000))
+
+=== Cell 19 [markdown] ===
+## 8. Train the Attention U-Net
+
+Same encoder/decoder, but every skip connection passes through an additive
+attention gate (Oktay et al., 2018) that uses the deeper decoder feature as a
+gating signal to suppress background before concatenation.
+
+=== Cell 20 [code] ===
+import time
+import train_attention_unet
+
+start = time.time()
+attn_history = train_attention_unet.main(
+    num_epochs=config.NUM_EPOCHS,
+    batch_size=config.BATCH_SIZE,
+    image_size=config.IMAGE_SIZE,
+    num_workers=config.NUM_WORKERS,
+    checkpoint_dir=config.CHECKPOINT_DIR,
+    results_dir=config.RESULTS_DIR,
+)
+print(f"\nAttention U-Net finished in {(time.time() - start) / 60:.1f} min")
+
+=== Cell 21 [code] ===
+from IPython.display import Image as ShowImage, display
+
+for plot in ("attention_unet_loss_curves.png", "attention_unet_seg_curves.png",
+             "attention_unet_cls_curves.png"):
+    path = config.RESULTS_DIR / plot
+    if path.exists():
+        display(ShowImage(filename=str(path), width=1000))
+
+=== Cell 22 [markdown] ===
+## 9. Evaluate both models on train / val / test
+
+Note that the training split is re-evaluated **without augmentation** here, so the
+numbers are comparable across splits.
+
+=== Cell 23 [code] ===
+import torch
+from torch.utils.data import DataLoader
+
+from src.dataset import OxfordPetDataset
+from src.transforms import get_eval_transform
+from src.models.unet import BaseUNet
+from src.models.attention_unet import AttentionUNet
+from src.evaluation import full_evaluation, print_metrics_table
+
+eval_tf = get_eval_transform(config.IMAGE_SIZE)
+
+
+def make_loader(entries):
+    ds = OxfordPetDataset(config.IMAGE_DIR, config.TRIMAP_DIR, entries, class_to_idx,
+                          image_size=config
+
+=== Cell 24 [markdown] ===
+### Side-by-side comparison on the test set
+
+=== Cell 25 [code] ===
+import pandas as pd
+
+rows = []
+labels = [("IoU", "iou"), ("Dice", "dice"), ("Pixel Accuracy", "pixel_accuracy"),
+          ("Cls Accuracy", "cls_accuracy"), ("Cls Precision", "cls_precision"),
+          ("Cls Recall", "cls_recall"), ("Cls F1", "cls_f1")]
+
+for label, key in labels:
+    base = all_metrics["unet"]["test"][key]
+    attn = all_metrics["attention_unet"]["test"][key]
+    rows.append({
+        "Metric": label,
+        "Base U-Net": round(base, 4),
+        "Attention U-Net": round(attn, 
+
+=== Cell 26 [markdown] ===
+## 10. Qualitative demo
+
+Original image | ground-truth mask overlay | predicted mask overlay, titled with the
+true breed, the predicted breed, and the per-image IoU. Change `SAMPLE_INDICES` to
+inspect any images you like.
+
+=== Cell 27 [code] ===
+from IPython.display import Image as ShowImage, display
+
+from demo import predict_by_index
+from src.visualization import show_prediction
+
+SAMPLE_INDICES = [12, 145, 900, 2100]
+MODEL_KEY = "attention_unet"      # or "unet"
+
+full_ds = OxfordPetDataset(
+    config.IMAGE_DIR, config.TRIMAP_DIR,
+    train_entries + val_entries + test_entries, class_to_idx,
+    image_size=config.IMAGE_SIZE, transform=eval_tf, mode="val",
+)
+
+model = load_checkpoint(MODEL_KEY)
+for index in SAMPLE_INDICES:
+    if index >
+
+=== Cell 28 [markdown] ===
+## 11. Collect the outputs
+
+- **Kaggle:** everything under `/kaggle/working` is already saved as notebook
+  output — use the *Output* tab after committing the notebook.
+- **Colab:** this zips `results/` and `checkpoints/` and triggers a browser download.
+  Checkpoints are ~120 MB each, so set `INCLUDE_CHECKPOINTS = False` if you only
+  want the plots and CSVs.
+
+=== Cell 29 [code] ===
+import shutil, sys
+from pathlib import Path
+
+INCLUDE_CHECKPOINTS = False
+
+staging = Path("/tmp/cse428_outputs") if not config.IN_KAGGLE else Path("/kaggle/working/_bundle")
+if staging.exists():
+    shutil.rmtree(staging)
+staging.mkdir(parents=True)
+
+shutil.copytree(config.RESULTS_DIR, staging / "results", dirs_exist_ok=True)
+if INCLUDE_CHECKPOINTS:
+    shutil.copytree(config.CHECKPOINT_DIR, staging / "checkpoints", dirs_exist_ok=True)
+
+archive = shutil.make_archive(str(staging.parent / "cse428_o
+
+=== Cell 30 [markdown] ===
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `RuntimeError: CUDA is required...` | The runtime has no GPU — switch the accelerator on (§ top) and re-run from cell 1. |
+| `CUDA out of memory` | Lower `config.BATCH_SIZE` to 8 or 4, or `config.IMAGE_SIZE` to 128, then re-run the training cell. Restart the runtime first if memory stays fragmented. |
+| Download fails on Kaggle | Internet is off, or the account is not phone-verified. Either enable `Session options → Internet`, or `+ Add Inpu
+

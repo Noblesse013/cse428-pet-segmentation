@@ -1,0 +1,599 @@
+=== Cell 1 [markdown] ===
+# Loading dependencies
+
+=== Cell 2 [code] ===
+import skimage as ski
+from skimage import io, color, img_as_float, exposure
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import signal
+
+=== Cell 3 [markdown] ===
+# Neighborhood processing
+
+=== Cell 4 [markdown] ===
+Neighborhood processing in image processing involves modifying a pixel's value based on the values of its neighboring pixels. So far we have worked on point processing where we didn't consider the pixel neighborhood while updating a pixel's value.
+
+Neighborhood processing uses kernels that slides over the image and updates the image accounting for the local structure. This process is called filtering and this is the foundation of convolutional neural networks that we will study in Lab 7. Filteri
+
+=== Cell 5 [markdown] ===
+![1_sCUNjAOQvXc3dr8dcSSfoA.gif](data:image/gif;base64,R0lGODlhlQJjAfcAAP///87vvdbvvb3O90pzxc73xUp7xff39wAAAO/v787Ozubm3jExMXt7e2NjY9be3oSMjM7WxbW1vZSMjDo6MUpKQpSclHNra7W1ra2trXt7hJSlhL3W9yEZISEpKb3OpTo6Qr3eraWlpc7vxYSUe1JSUmt7Y0paQsW9vVJaWq29lN73xZy1jHuUa1qU5kJKMbXe1kJClAgQCCFrrYy91oyl1oyErVqUrToxGUpzUlprhK293nNCWjFz1q3OpRlzjLWMjGNClEprrVqUhAgpEBkxUhlChDFSUhlaKRlaCDGc3hAQGc7mrXNrQtb33hBSWmNrWiEpGb3mrQgACFpr5tbF70I6UlqUxZS1pSEQEK2MrYylrRkxMd69xff/vffW94SMe9be7/fW79bm9869xWN7xd73va3O9xAAANbm3kpjxe
+
+=== Cell 6 [markdown] ===
+![movie1-1-1.gif](data:image/gif;base64,R0lGODlhGgO/AYcAAP///////f//+///+v//+P//8v7///z///v///7//f3//v7/+/z//fz/+/z/+fz/8/r///n///j///n//Pj//Pn/9/f///X//vb/+fP//O7//P/+///9///8///+/f/++//9/f/8/f/8+//++v/8+v/99v/97/7+//7+/v3+//79//39/f78/f79+fz+/vz8/vz8/Pz9+fj9/P/7///7/f/6///5///2///7+//7+P/5+f/3+f/68f/17v37/fv7/fv7+/r7/vz79vz6/fr6/vr6+vz6+Pz3+fn5+fj4+Pf39/X29vL29P7y8f/o5u/v7+Xn5urj4fva1t/f39PU1P/KxtLLyv68uOG6uL/Av7W2t7GxsauxxLCwsKuwt8Curq6urq2traysrKyuq6urq6yqq6uqqaqttKqqrKqqqqqspqqoqqmrraiqqamp
+
+=== Cell 7 [markdown] ===
+All the operations shown in the gifs are cross-correlation. For convolution the filter is flipped 180° at first and then a cross-correlation operation is performed between the image and the flipped filter.
+
+=== Cell 8 [markdown] ===
+# Getting started with filtering operation
+
+=== Cell 9 [markdown] ===
+For now, lets keep things simple. Lets take a grayscale image and apply a filter on it -
+
+=== Cell 10 [code] ===
+I = io.imread("sample_1.jpg")
+I = img_as_float(I)
+I = color.rgb2gray(I)
+
+plt.imshow(I, cmap = 'gray')
+plt.axis("off")
+plt.show()
+
+print(I.shape)
+
+=== Cell 11 [markdown] ===
+Now, we need to define a kernel array. Lets use a $25\times 25$ filter that takes all the pixels in the radius of 12, $(k-1)/2$, pixels from the center and averages them. Since each of the image patches are multiplied elementwise with the kernel and them summed up. So to get the average of all the pixels in the neighborhood, we can just do this -
+
+$$k =
+\frac{1}{25^2}\begin{bmatrix} 1\ 1\ .\ .\ .\ 1 \\
+1\ 1\ .\ .\ . \ 1 \\
+.\ .\ .\ .\ .\ . \\
+.\ .\ .\ .\ .\ . \\
+1\ 1\ .\ .\ .\ 1 \\ \end{bmatrix}
+
+=== Cell 12 [code] ===
+k = np.ones([25,25])/625.0
+
+I_filtered_corr = signal.correlate(I, k, mode='valid')
+
+plt.imshow(I_filtered_corr, cmap='gray')
+plt.axis('off');
+plt.show()
+
+print(I_filtered_corr.shape)
+
+=== Cell 13 [markdown] ===
+**Observations -**
+
+1. We applied the filter by correlating the image with our kernel. We could have applied the filter by convolving as well. To apply convolution, we need to call `signal.convolve()`.
+
+2. The image did get blurry as per our expectations.
+
+3. The dimensions got reduced by 1448 - 1424 = 24 which is equal to $k-1$.
+
+=== Cell 14 [markdown] ===
+Lets see the convolution version for this filter -
+
+=== Cell 15 [code] ===
+I_filtered_conv = signal.convolve(I, k, mode='valid') # valid: only those parts of the convolution that are computed without the zero-padded edges are returned.
+
+plt.imshow(I_filtered_conv, cmap='gray')
+plt.axis('off');
+plt.show()
+
+print(I_filtered_conv.shape)
+
+=== Cell 16 [markdown] ===
+The images look the same. They even have the same dimensions. Lets check if they are the same pictures.
+
+=== Cell 17 [code] ===
+print((I_filtered_corr == I_filtered_conv).all())
+
+=== Cell 18 [markdown] ===
+So, they are the same picture. Will it be the same for all filters? To check lets try a new filter -
+
+=== Cell 19 [code] ===
+k = np.zeros([25, 25])
+row = np.arange(-12, 13)
+for i in range(25):
+  k[i, :] = row
+
+plt.imshow(k, cmap = "Reds")
+plt.colorbar()
+plt.show()
+
+=== Cell 20 [code] ===
+I_filtered_corr = signal.correlate(I, k, mode='valid')
+I_filtered_conv = signal.convolve(I, k, mode='valid')
+
+fig = plt.figure(figsize=(14, 8))
+
+ax1 = fig.add_subplot(1,2,1)
+ax1.imshow(I_filtered_corr, cmap = 'gray')
+ax1.title.set_text("Correlated image")
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,2,2)
+ax2.imshow(I_filtered_conv, cmap = 'gray')
+ax2.title.set_text("Convoluted image")
+ax2.axis("off")
+
+plt.show()
+
+print("Correlated image shape - ", I_filtered_corr.shape)
+print("Convoluted image shape
+
+=== Cell 21 [markdown] ===
+Although the the resultant images have the same dimensions, they are looking a bit different. Looks a bit flipped on the y-axis. Lets check if they are truly different -
+
+=== Cell 22 [code] ===
+print((I_filtered_corr == I_filtered_conv).all())
+
+=== Cell 23 [markdown] ===
+So, why does the convolution operation produce similar results for one filter while producing different result for a different filter?
+
+The reasoning is left up to you to understand.
+
+=== Cell 24 [markdown] ===
+#Dimensionality reduction and padding
+
+=== Cell 25 [markdown] ===
+In the previous operations, we noticed that the dimensions are getting reduced by $k-1$ pixels. But why?
+
+Since, the kernels are centered on the pixels, the corner pixels get excluded. We lose $(k-1)/2$ pixels on all sides. See the next picture -
+
+=== Cell 26 [markdown] ===
+![mage-convolution-with-an-input-image-of-size-7-7-and-a-filter-kernel-of-size-3-3.png](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA1IAAAGdCAMAAAAv2bJ9AAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAMAUExURf///73X7ePj4625yfv7+2yR0QAAAL3X7625y/39/Xh4ePPz83JycsvLy3R0dL29vZeXl/n5+WxsbFRUVMPd9ZWVldfX1+3t7cHBwbXB01paWpmZmau3x5ubm9DPz25ubsHc88PDw/Hx8au3yebl5bu7u4uLi+fn52pqaq+7zampqaOjo3x8fExMTNvb2/f395OTk9PT08Xf93BwcMC/v7vU67/a8cbi+l9fX4aGhqenp+vr6z4+PrO/0a+7y1FRUZ2dnXCW2e/v79XV1WJiYuHh4d3d3RAQEXp6es3NzX
+
+=== Cell 27 [markdown] ===
+*Image collected from http://dx.doi.org/10.48550/arXiv.1708.00052
+
+=== Cell 28 [markdown] ===
+We can avoid this by padding our original image increasing initial dimensions by $(k-1)/2$ on all sides so that filtering balances out the dimensions. We can pad our images using `np.pad()` function -
+
+=== Cell 29 [code] ===
+A = np.array([1,2,3,4,5])
+np.pad(A, (2, 3), 'constant', constant_values = 0)
+
+=== Cell 30 [markdown] ===
+For this example we have padded with 0s. But padding can be done in different ways. Lets visualize it directly on the RGB version of our kayak image -
+
+=== Cell 31 [code] ===
+img = io.imread("sample_1.jpg")
+img = img_as_float(img)
+
+pad_width = 200
+
+img_white_padded = np.pad(img, pad_width=[(pad_width, pad_width),(pad_width, pad_width),(0, 0)], mode="constant", constant_values=1)
+img_zero_padded = np.pad(img, pad_width=[(pad_width, pad_width),(pad_width, pad_width),(0, 0)], mode="constant", constant_values=0)
+img_constant_padded = np.pad(img, pad_width=[(pad_width, pad_width),(pad_width, pad_width),(0, 0)], mode="constant", constant_values=200/255)
+img_edge_padded = n
+
+=== Cell 32 [markdown] ===
+`pad_width` expects an argument of the format -
+```
+pad_width = [(dim_0_left_pad, dim_0_right_pad),
+            (dim_1_left_pad, dim_1_right_pad),
+            .................................,
+            (dim_n_left_pad, dim_n_right_pad)]
+```
+
+=== Cell 33 [code] ===
+#Multiple plots using pyplot
+fig = plt.figure(figsize=(15, 10))
+
+ax1 = fig.add_subplot(2,3,1)
+ax1.imshow(img_white_padded)
+# referring white_padded as original to show all the images in the same scale,
+# might not work if your notebook background is not white! :3
+ax1.title.set_text('1. Original image (no padding)')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(2,3,2)
+ax2.imshow(img_zero_padded)
+ax2.title.set_text('2. Zero padding (constant = 0)')
+ax2.axis("off")
+
+ax3 = fig.add_subplot(2,3,3)
+ax3.imshow
+
+=== Cell 34 [markdown] ===
+You can read more about it on https://numpy.org/doc/stable/reference/generated/numpy.pad.html.
+
+=== Cell 35 [markdown] ===
+Most popular type of padding is zero padding. Lets try out zero pading on our grayscale variant of the image and filter it again. Remember, we need to pad each side by $(k-1)/2$ to preserve dimensionss.
+
+=== Cell 36 [code] ===
+k = np.ones([25,25])/625.0
+
+pad_width = (25-1)//2
+
+I_padded = np.pad(I, pad_width=[(pad_width, pad_width),(pad_width, pad_width)], mode="constant", constant_values=0)
+
+I_filtered = signal.correlate(I_padded, k, mode='valid')
+
+fig = plt.figure(figsize=(15, 10))
+
+ax1 = fig.add_subplot(1,3,1)
+ax1.imshow(I, cmap = 'gray')
+ax1.title.set_text('No padding')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,3,2)
+ax2.imshow(I_padded, cmap = 'gray')
+ax2.title.set_text('Zero padded')
+ax2.axis("off")
+
+ax3 = fig.add_
+
+=== Cell 37 [markdown] ===
+❗For the rest of this course, we will use zero padding, unless otherwise specified.❗
+
+❗❗You don't have to separately pad images like this, you can just use `mode='same'` in `signal.correlate()` and `signal.convolve()` to acheieve the same result.❗❗
+
+=== Cell 38 [code] ===
+I_filtered_corr = signal.correlate(I, k, mode='same')
+I_filtered_conv = signal.convolve(I, k, mode='same')
+
+fig = plt.figure(figsize=(15, 10))
+
+ax1 = fig.add_subplot(1,3,1)
+ax1.imshow(I_filtered, cmap = 'gray')
+ax1.title.set_text('NumPy padding')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,3,2)
+ax2.imshow(I_filtered_corr, cmap = 'gray')
+ax2.title.set_text('Correlate padding')
+ax2.axis("off")
+
+ax3 = fig.add_subplot(1,3,3)
+ax3.imshow(I_filtered_conv, cmap = 'gray')
+ax3.title.set_text('Convolve paddin
+
+=== Cell 39 [markdown] ===
+# Odd kernels vs even kernels
+
+=== Cell 40 [markdown] ===
+If you have noticed, we have only designed kernels that are odd in size. We haven't worked with even kernels. Even kernels are 'odd'. They do not have a center point which messes with our understanding of the filtering operation. For maintaining dimensionality, the padding needs to be asymmetric too. In practice, we never use even sized filters. While it is possible to use even kernels, in practice we will not use even kernels.
+
+=== Cell 41 [code] ===
+k = np.ones([24,24])/(24*24)
+
+I_filtered_corr = signal.correlate(I, k, mode='valid')
+I_filtered_conv = signal.convolve(I, k, mode='valid')
+
+fig = plt.figure(figsize=(14, 8))
+
+ax1 = fig.add_subplot(1,2,1)
+ax1.imshow(I_filtered_corr, cmap = 'gray')
+ax1.title.set_text("Correlated image")
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,2,2)
+ax2.imshow(I_filtered_conv, cmap = 'gray')
+ax2.title.set_text("Convoluted image")
+ax2.axis("off")
+
+plt.show()
+
+print("Correlated image shape - ", I_filtered_corr.shape)
+
+=== Cell 42 [markdown] ===
+The dimension reduced from 1448 to 1425, a 23 pixel reduction, still a $k-1$ reduction.
+
+=== Cell 43 [markdown] ===
+# Gaussian kernel, a better blurring kernel and 3D filtering
+
+=== Cell 44 [code] ===
+def gaussian_kernel(stdev=1, size=10):
+    x = np.linspace(-size // 2, size // 2, size)
+    gaussian1dkernel = np.exp(-0.5 * (x / stdev)**2)
+    gaussian1dkernel /= np.sum(gaussian1dkernel)
+    kernel = np.outer(gaussian1dkernel, gaussian1dkernel) #outer represents outer product
+    return kernel / np.sum(kernel)
+
+=== Cell 45 [code] ===
+
+
+=== Cell 46 [code] ===
+# kernel shape
+k = 25
+
+# standard deviation
+spread = 8
+
+# define kernel
+kernel = gaussian_kernel(spread, k)
+plt.imshow(kernel, cmap = "Reds")
+plt.colorbar()
+plt.show()
+
+=== Cell 47 [markdown] ===
+So closer neighbors get higher priority in Gaussian filter.
+
+Lets see its effect on our Kayak image compared to our previous blurring kernel, a box kernel. For filtering 3D image, we just have to repeat the same filter on all the channels.
+
+=== Cell 48 [code] ===
+plt.imshow(img)
+
+=== Cell 49 [code] ===
+k_all = [5, 55, 205]
+
+filtered_img_all_box = np.stack((np.zeros_like(img),)*len(k_all), axis=-1)
+
+spread = 9
+
+for i, k_unique in enumerate(k_all):
+  kernel = np.ones([k_unique,k_unique])/(k_unique*k_unique)
+  for j in range(img.shape[-1]):
+    filtered_img_all_box[:,:,j, i] = np.clip(signal.correlate(img[:,:,j], kernel, mode='same', method='auto'), 0, 1)
+
+filtered_img_all_gaussian = np.stack((np.zeros_like(img),)*len(k_all), axis=-1)
+
+for i, k_unique in enumerate(k_all):
+  kernel = gaussian_kern
+
+=== Cell 50 [code] ===
+# print(filtered_img_all_box.shape)
+
+=== Cell 51 [code] ===
+fig = plt.figure(figsize=(15, 10))
+
+ax1 = fig.add_subplot(2,3,1)
+ax1.imshow(filtered_img_all_box[:,:,:,0])
+ax1.title.set_text('(5 x 5) Box kernel')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(2,3,2)
+ax2.imshow(filtered_img_all_box[:,:,:,1])
+ax2.title.set_text('(55 x 55) Box kernel')
+ax2.axis("off")
+
+ax3 = fig.add_subplot(2,3,3)
+ax3.imshow(filtered_img_all_box[:,:,:,2])
+ax3.title.set_text('(205 x 205) Box kernel')
+ax3.axis("off")
+
+ax4 = fig.add_subplot(2,3,4)
+ax4.imshow(filtered_img_all_gaussian[:,:,:
+
+=== Cell 52 [markdown] ===
+#Median filter
+
+=== Cell 53 [markdown] ===
+Remember the old grainy grayscale images? The grains are called salt and pepper noise. They require median filters to be cleaned. Gaussian filter doesn't work on them. First lets add salt and pepper noise to our grayscale kayak image. Then we will try to clean it using Gaussian blur. Then we will apply median filter.
+
+=== Cell 54 [code] ===
+# Salt-and-pepper noise exists only for grayscale images
+I = color.rgb2gray(img)
+
+noisy_image_sp = ski.util.random_noise(I, mode='s&p')
+
+plt.figure(figsize=(10,8))
+plt.imshow(noisy_image_sp, cmap='gray')
+plt.axis("off")
+plt.show()
+
+=== Cell 55 [code] ===
+k = 31
+spread = k/10
+kernel = gaussian_kernel(spread, size=k)
+
+img_filtered = signal.correlate(noisy_image_sp, kernel, mode='same', method='auto')
+
+plt.figure(figsize=(10,8))
+plt.imshow(img_filtered, cmap='gray')
+plt.axis("off")
+plt.show()
+
+=== Cell 56 [markdown] ===
+Gaussian blurring doesn't help much. Lets try median filter instead.
+
+=== Cell 57 [code] ===
+from skimage.filters import median
+from skimage.morphology import disk
+
+# Define a structuring element (neighborhood shape) for the median filter
+footprint = disk(1)  # Disk-shaped neighborhood with radius 1
+
+# Apply the median filter
+img_filtered_median = median(noisy_image_sp, footprint=footprint, mode='nearest', cval=0.0)
+
+=== Cell 58 [code] ===
+# print(footprint)
+
+=== Cell 59 [code] ===
+plt.figure(figsize=(10,8))
+plt.imshow(img_filtered_median, cmap='gray')
+plt.axis("off")
+plt.show()
+
+=== Cell 60 [markdown] ===
+We got a super clean image after applying median filter.
+
+=== Cell 61 [markdown] ===
+For more information on structuring elements, check this out - https://scikit-image.org/docs/stable/auto_examples/numpy_operations/plot_structuring_elements.html#sphx-glr-auto-examples-numpy-operations-plot-structuring-elements-py
+
+=== Cell 62 [markdown] ===
+# Unsharp masking
+
+=== Cell 63 [markdown] ===
+We can imagine each image as a sharp component added with a blurry component. In this formulation if we subtract the blurry component, we will get our sharp component. Addding this sharp component to the whole image will give the image a sharper look. This is the concept of unsharp masking. Lets see this in action -
+
+=== Cell 64 [code] ===
+I = io.imread('/content/sample_2.jpg')
+I = img_as_float(I)
+I = color.rgb2gray(I)
+
+plt.imshow(I, cmap='gray')
+plt.axis('off')
+plt.show()
+
+=== Cell 65 [markdown] ===
+Lets make this image sharper by subtracting the blurry component.
+
+=== Cell 66 [code] ===
+k = 75
+spread = 20
+kernel = gaussian_kernel(spread, k)
+
+blurry_component = signal.correlate(I, kernel, mode='same', method='auto')
+
+plt.imshow(blurry_component, cmap='gray')
+plt.title("Blurry component")
+plt.axis('off')
+plt.show()
+
+=== Cell 67 [code] ===
+sharp_component = I - blurry_component
+unsharp_masked = I + sharp_component
+
+fig = plt.figure(figsize=(12, 8))
+
+ax1 = fig.add_subplot(1,2,1)
+ax1.imshow(I, cmap='gray')
+ax1.title.set_text('Original image')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,2,2)
+ax2.imshow(unsharp_masked, cmap='gray')
+ax2.title.set_text("Unsharp masked")
+ax2.axis("off")
+
+plt.show()
+
+=== Cell 68 [markdown] ===
+The edges are more visible now.
+
+=== Cell 69 [markdown] ===
+# High boost filtering
+
+=== Cell 70 [markdown] ===
+High boost filtering is basically a stronger unsharp masking.
+
+`Unsharp masked image = Image + k * Sharp component`, when k = 1
+
+`High boost filtered image = Image + k * Sharp component`, when k > 1
+
+=== Cell 71 [code] ===
+high_boost_filtered = I + 3.5*sharp_component
+
+fig = plt.figure(figsize=(12, 8))
+
+ax1 = fig.add_subplot(1,3,1)
+ax1.imshow(I, cmap='gray')
+ax1.title.set_text('Original image')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,3,2)
+ax2.imshow(unsharp_masked, cmap='gray')
+ax2.title.set_text("Unsharp masked")
+ax2.axis("off")
+
+ax3 = fig.add_subplot(1,3,3)
+ax3.imshow(high_boost_filtered, cmap='gray')
+ax3.title.set_text("High boost filtered")
+ax3.axis("off")
+
+plt.show()
+
+=== Cell 72 [markdown] ===
+# Adaptive histogram equalization (AHE)
+
+=== Cell 73 [markdown] ===
+We worked with histogram qualization in the last lab. We have seen that histeq performs quite well on some images while making the image worse in other cases. Lets take the sculpture image that we worked with below -
+
+=== Cell 74 [code] ===
+I = io.imread('/content/sample_3.png')
+
+plt.imshow(I, cmap='gray')
+plt.axis('off')
+plt.show()
+
+=== Cell 75 [markdown] ===
+After applying histeq, the image becomes -
+
+=== Cell 76 [code] ===
+I_equalized = exposure.equalize_hist(I)
+
+plt.imshow(I_equalized, cmap = 'grey')
+plt.title("Histogram equalized using equalize_hist()")
+plt.axis('off');
+
+=== Cell 77 [markdown] ===
+The image quality gets degraded because the image has varying brightness at different regions of the image. The background, comprisisng most of the image is quite dark, while the foreground is bright. Histeq tries to equalize the brightness of the entire image which causes the already bright regions to worsen in quality.
+
+From the motivation of our kernel filtering method, can we improve histeq to work better on this image? Yes, adaptive histogram equalization (AHE) takes partitions (non-sliding
+
+=== Cell 78 [code] ===
+I_ahe = exposure.equalize_adapthist(I, kernel_size=(64,64), clip_limit=0)
+
+fig = plt.figure(figsize=(12, 8))
+
+ax1 = fig.add_subplot(1,2,1)
+ax1.imshow(I_equalized, cmap='gray')
+ax1.title.set_text('Globally equalized image')
+ax1.axis("off")
+
+ax2 = fig.add_subplot(1,2,2)
+ax2.imshow(I_ahe, cmap='gray')
+ax2.title.set_text('Locally equalized image (AHE)')
+ax2.axis("off")
+
+plt.show()
+
+=== Cell 79 [markdown] ===
+The image is a bit better now. The sculpture face has all the edges. Lets see how AHE is implemented in the next block.
+
+You don't have to understand the next code block. Implementation has more or less been taken from SkImage.
+
+=== Cell 80 [code] ===
+from matplotlib.patches import Rectangle
+
+# Define AHE parameters
+kernel_size = (64, 64)
+clip_limit = 0.0  # AHE (i.e., no clipping)
+
+# Reflection padding
+pad_start_per_dim = [k // 2 for k in kernel_size]
+pad_end_per_dim = [(k - s % k) % k + int(np.ceil(k / 2.0)) for k, s in zip(kernel_size, I.shape)]
+padded_image = np.pad(
+    I,
+    pad_width=((pad_start_per_dim[0], pad_end_per_dim[0]), (pad_start_per_dim[1], pad_end_per_dim[1])),
+    mode='reflect'
+)
+
+# Partition image
+rows, cols = padded_ima
+
+=== Cell 81 [markdown] ===
+#Contrast limited adaptive hhistogram equalization (CLAHE)
+
+=== Cell 82 [markdown] ===
+AHE does good, but can we do better? The AHE resultant image looks a bit bad because of unusually high noise. In the previous image, notice the background paper attached on the wall. AHE introduces a bunch of artifacts (noises) that were not originally present. AHE, while a good equalization technique, unfortunately amplifies noise contrast that creates problem. To mitigate this we have an updated variant - CLAHE.
+
+=== Cell 83 [markdown] ===
+![image.png](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABBUAAALxCAYAAAADhJ6pAAAgAElEQVR4AezdDei121rX+2V7eSp6kV6IiNJCQiUiiS3IgjgiEpEQiCiiEEjstc/GIxKIdE6dDZ0IChH33iJhhIiGlYQo4tohEiERIuLZBEa4JOpExIkIgkBMax4+c6zvc4//vebzrOdl7b3WfNb1h8EY93i9xjXuef1+4xpjzv8rl/kbDYwGRgOjgdHAaGA0MBoYDYwGRgOjgdHAaGA08BwaeOU52kyT0cBoYDQwGhgNjAZGA6OB0cBoYDQwGhgNjAZGA5dxKsxLMBoYDYwGRgOjgdHAaGA0MBoYDYwGRgOjgdHAc2lgnArPpbZpNBoYDYwGRgOjgdHAaGA0MBoYDYwGRgOjgdHAOBXmHRgNjAZGA6OB0cBoYDQwGhgNjAZGA6OB0cBo4Lk0ME6F51LbNBoNjAZGA6OB0
+
+=== Cell 84 [markdown] ===
+To implement CLAHE, we use the same function `exposure.equalize_adapthist(..., clip_limit)`; except we set clip limit > 0.
+
+=== Cell 85 [code] ===
+I_ahe = exposure.equalize_adapthist(I, kernel_size=(64,64), clip_limit=0)
+I_clahe = exposure.equalize_adapthist(I, kernel_size=(64,64), clip_limit=0.01)
+
+fig, axes = plt.subplots(2, 2, figsize=(20, 12))
+
+axes[0,0].imshow(I, cmap='gray')
+axes[0,0].title.set_text('Globally equalized image')
+axes[0,0].axis("off")
+
+axes[0,1].imshow(I_equalized, cmap='gray')
+axes[0,1].title.set_text('Globally equalized image')
+axes[0,1].axis("off")
+
+axes[1,0].imshow(I_ahe, cmap='gray')
+axes[1,0].title.set_text('Local
+
