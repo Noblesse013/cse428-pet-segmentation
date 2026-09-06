@@ -124,10 +124,16 @@ def main(
                                  weight_decay=weight_decay)
     # ReduceLROnPlateau: if val IoU stops improving, the LR is halved.
     # This is the key technique for closing the train/val gap.
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=lr_scheduler_factor,
-        patience=lr_scheduler_patience, verbose=True,
-    )
+    try:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=lr_scheduler_factor,
+            patience=lr_scheduler_patience, verbose=True,
+        )
+    except TypeError:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=lr_scheduler_factor,
+            patience=lr_scheduler_patience,
+        )
     criterion = MultiTaskLoss(classification_weight=CLASSIFICATION_LOSS_WEIGHT)
     scaler = get_grad_scaler(enabled=USE_AMP)
     no_improve_count = 0
