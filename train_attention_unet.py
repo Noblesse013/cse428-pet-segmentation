@@ -116,16 +116,10 @@ def main(
     # ── Optimiser & loss ────────────────────────────────────────────────
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE,
                                  weight_decay=1e-5)
-    try:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='max', factor=lr_scheduler_factor,
-            patience=lr_scheduler_patience, verbose=True,
-        )
-    except TypeError:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='max', factor=lr_scheduler_factor,
-            patience=lr_scheduler_patience,
-        )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=lr_scheduler_factor,
+        patience=lr_scheduler_patience,
+    )
     criterion = MultiTaskLoss(classification_weight=CLASSIFICATION_LOSS_WEIGHT)
     scaler = get_grad_scaler(enabled=USE_AMP)
     no_improve_count = 0
